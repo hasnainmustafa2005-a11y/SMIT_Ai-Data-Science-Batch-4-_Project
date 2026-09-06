@@ -1,0 +1,1049 @@
+{
+  "name": "Banking_System_AI & Data Science_Project",
+  "nodes": [
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyMinute"
+            }
+          ]
+        },
+        "simple": false,
+        "filters": {
+          "q": "is:unread label:INBOX"
+        },
+        "options": {}
+      },
+      "id": "38f26d0e-8ec4-46d5-a5be-54d5e744b8af",
+      "name": "Gmail Trigger",
+      "type": "n8n-nodes-base.gmailTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -5440,
+        2752
+      ],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "8L7rqktUeMZTXI87",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const email = $input.first().json;\nlet sender = '';\nif (typeof email.from === 'string') {\n  sender = email.from;\n} else if (email.from?.text) {\n  sender = email.from.text;\n} else if (email.from?.value?.[0]?.address) {\n  sender = email.from.value[0].address;\n} else if (email.headers?.from) {\n  sender = email.headers.from;\n}\nsender = String(sender || '');\nconst match = sender.match(/<([^>]+)>/);\nconst senderEmail = match ? match[1].trim() : (sender.trim() || 'customer@example.com');\n\nreturn [{\n  json: {\n    sender_email: senderEmail,\n    subject: String(email.subject || email.headers?.subject || 'Support Query'),\n    customer_query: String(email.snippet || email.textPlain || email.subject || '').trim(),\n    message_id: email.id || email.messageId || ''\n  }\n}];"
+      },
+      "id": "12afc9ee-f6b7-47e6-bcc9-1b27069933d2",
+      "name": "Parse Inbound Email",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -5232,
+        2752
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-001:embedContent",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-goog-api-key",
+              "value": "AQ.Ab8RN6LHBPeHcgsDWNapdbskL-sGNdjPpqAhMLrYwpVVjT_uig"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"content\": {\n    \"parts\": [\n      {\n        \"text\": {{ JSON.stringify($json.customer_query) }}\n      }\n    ]\n  },\n  \"output_dimensionality\": 768\n}",
+        "options": {}
+      },
+      "id": "b297b24f-4108-44fe-9e37-f9e3902454f5",
+      "name": "Generate Query Embedding (Gemini)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -5008,
+        2752
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://bank-policies-a7lgv6c.svc.aped-4627-b74a.pinecone.io/query",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Api-Key",
+              "value": "pcsk_bwxHa_N4aCrRsJbCBKvgJwRfmqi3a2Xe8Ahg73RvWGUNhRagwfdJ1TF3MiwZYNCrwqjFo"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"vector\": {{ JSON.stringify($json.embedding.values) }},\n  \"topK\": 2,\n  \"includeMetadata\": true\n}",
+        "options": {}
+      },
+      "id": "9c2b4ca5-aaf8-429c-b228-229cf1cb839a",
+      "name": "Query Pinecone Policies",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -4784,
+        2752
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const matches = $json.matches || [];\nconst topScore = matches.length > 0 ? matches[0].score : 0;\nconst context = matches.map(m => (m.metadata ? m.metadata.text : '')).join('\\n\\n');\nconst original = $('Parse Inbound Email').first().json;\n\nconst query = original.customer_query.toLowerCase();\nconst isHighRisk = query.includes('fraud hold') || query.includes('unfreeze') || query.includes('dispute') || query.includes('chargeback');\nconst isConfident = topScore >= 0.70 && context.trim().length > 0;\n\nreturn [{\n  json: {\n    sender_email: original.sender_email,\n    subject: original.subject,\n    customer_query: original.customer_query,\n    retrieved_context: isConfident ? context : 'INSUFFICIENT_INFORMATION',\n    top_score: topScore,\n    requires_human_approval: isHighRisk || !isConfident\n  }\n}];"
+      },
+      "id": "1ad9de55-b141-453e-a261-240154690c65",
+      "name": "Evaluate Guardrail (Req 5.7)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -4560,
+        2752
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-goog-api-key",
+              "value": "AQ.Ab8RN6LHBPeHcgsDWNapdbskL-sGNdjPpqAhMLrYwpVVjT_uig"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"contents\": [\n    {\n      \"parts\": [\n        {\n          \"text\": {{ JSON.stringify(\"SYSTEM: Draft a banking support reply based ONLY on the provided policies. If the context says INSUFFICIENT_INFORMATION or requires restricted operations, clearly explain policy and advise that specialist human review is required.\\n\\nPOLICIES:\\n\" + $json.retrieved_context + \"\\n\\nCUSTOMER QUESTION:\\n\" + $json.customer_query) }}\n        }\n      ]\n    }\n  ]\n}",
+        "options": {}
+      },
+      "id": "d6e865a5-d13b-42ba-97c1-5261e9e00d10",
+      "name": "LLM Creates Draft (Gemini 3.6)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -4352,
+        2752
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO public.approvals (type, status, payload, requested_at)\nVALUES (\n  'RAG_SUPPORT_RESPONSE',\n  'PENDING',\n  json_build_object(\n    'recipient', '{{ $('Evaluate Guardrail (Req 5.7)').item.json.sender_email }}',\n    'subject', '{{ $('Evaluate Guardrail (Req 5.7)').item.json.subject }}',\n    'draft_response', '{{ $json.candidates[0].content.parts[0].text.replace(/'/g, \"''\") }}'\n  ),\n  now()\n)\nRETURNING id::text AS approval_id, status;",
+        "options": {}
+      },
+      "id": "9b74352b-4b7d-49d3-8775-d47ea07ae4b1",
+      "name": "Create Approval Request (Req 5.6)",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        -4128,
+        2752
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "yEKIebmB3WWK2PUr",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "mianhassnainmustafa@gmail.com",
+        "subject": "ACTION REQUIRED: Support Draft Pending Approval",
+        "emailType": "text",
+        "message": "=A new customer support response was drafted and requires approval before transmission:\n\nRecipient: {{ $('Evaluate Guardrail (Req 5.7)').item.json.sender_email }}\nQuestion: {{ $('Evaluate Guardrail (Req 5.7)').item.json.customer_query }}\n\nDraft Answer:\n{{ $('LLM Creates Draft (Gemini 3.6)').item.json.candidates[0].content.parts[0].text }}\n\nApproval ID: {{ $json.approval_id }}\nStatus: PENDING\n\n--- Quick Actions ---\nApprove & Send: https://primary-production-4592.up.railway.app/webhook/rag-approve?approval_id={{ $json.approval_id }}&decision=approved\nReject: https://primary-production-4592.up.railway.app/webhook/rag-approve?approval_id={{ $json.approval_id }}&decision=rejected",
+        "options": {}
+      },
+      "id": "f08dff5e-67f8-4772-9bb5-a10f0aa03e2c",
+      "name": "Send Approval Alert to Ops",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        -3904,
+        2752
+      ],
+      "webhookId": "0cc684f4-0c8f-414f-9bd2-c38c5bd4211f",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "8L7rqktUeMZTXI87",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "path": "rag-approve",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "27fadb5c-6b51-455d-8ddd-abccafffe5f6",
+      "name": "Reviewer Decision Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -3680,
+        2752
+      ],
+      "webhookId": "rag-approve"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE public.approvals\nSET status = CASE WHEN '{{ $json.query.decision }}' = 'approved' THEN 'APPROVED' ELSE 'REJECTED' END,\n    decided_at = now(),\n    approver = 'human_ops'\nWHERE id = '{{ $json.query.approval_id }}'::uuid AND status = 'PENDING'\nRETURNING id, status, payload;",
+        "options": {}
+      },
+      "id": "c8f8dac3-e694-4bef-8ef6-a48e9277f349",
+      "name": "Update Approval Record",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        -3472,
+        2752
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "yEKIebmB3WWK2PUr",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "cond-approved",
+              "leftValue": "={{ $json.status }}",
+              "rightValue": "APPROVED",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "4273ef01-e326-4556-83e5-dd58107f30b3",
+      "name": "Is Draft Approved?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -3248,
+        2752
+      ]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.payload.recipient }}",
+        "subject": "=Re: {{ $json.payload.subject }}",
+        "emailType": "text",
+        "message": "={{ $json.payload.draft_response }}\n\n---\nDigital Banking Support Operations",
+        "options": {}
+      },
+      "id": "8f83e49d-53a0-4445-932a-83aea78c7cec",
+      "name": "Send Approved Reply via Gmail",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        -3024,
+        2672
+      ],
+      "webhookId": "34552ce4-4cac-4cc0-9e15-34f38270ed6a",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "8L7rqktUeMZTXI87",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{\n  json: {\n    status: 'success',\n    message: 'Decision recorded: ' + ($('Update Approval Record').item.json.status || 'PROCESSED'),\n    approval_id: $('Update Approval Record').item.json.id\n  }\n}];"
+      },
+      "id": "d46510d3-1488-4d87-b5ae-483fc265b5e1",
+      "name": "Return Reviewer Ack",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2800,
+        2752
+      ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 15
+            }
+          ]
+        }
+      },
+      "id": "ecedd542-8776-42cd-ac70-d1ad7c692ef0",
+      "name": "Standing Orders Schedule (15m)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -5440,
+        3056
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT * FROM process_due_standing_orders(CURRENT_DATE);",
+        "options": {}
+      },
+      "id": "9f39c9f6-08cd-404c-a0d5-b7474d7a7d42",
+      "name": "Execute Standing Orders in DB",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        -5232,
+        3056
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "yEKIebmB3WWK2PUr",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "cond-so-fail",
+              "leftValue": "={{ $json.status }}",
+              "rightValue": "permanently_failed",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "c4acc3ba-16f3-4774-ac08-0ce37a9fca3c",
+      "name": "Standing Order Failed Permanently?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -5008,
+        3056
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT h.email, h.full_name, s.amount, s.dest_account_id \nFROM standing_orders s \nJOIN account_memberships m ON s.source_account_id = m.account_id \nJOIN account_holders h ON m.holder_id = h.id \nWHERE s.id = '{{ $json.id }}' AND m.role = 'primary'\nLIMIT 1;",
+        "options": {}
+      },
+      "id": "4415bc1c-9ec5-4ba7-9d4c-fca9f9c37fd7",
+      "name": "Fetch Primary Holder Details",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        -4784,
+        3024
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "yEKIebmB3WWK2PUr",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.email }}",
+        "subject": "URGENT: Scheduled Standing Order Payment Failed",
+        "emailType": "text",
+        "message": "=Dear {{ $json.full_name }},\n\nYour recurring standing order payment of ${{ $json.amount }} has exceeded the maximum retry limit of 3 cycles and has permanently failed.\n\nPlease check your account balance to reactivate this schedule.\n\n— Automated Banking Operations",
+        "options": {}
+      },
+      "id": "77877bc3-1934-4b23-ae3a-e23f855f5cd3",
+      "name": "Send SO Failure Notice via Gmail",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        -4560,
+        3024
+      ],
+      "webhookId": "f7073f1f-e5f5-4e7a-8a2a-98696c63818a",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "8L7rqktUeMZTXI87",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 0 * * *"
+            }
+          ]
+        }
+      },
+      "id": "4e6501d4-d725-4641-9724-b2bfa7329bc1",
+      "name": "Schedule (Midnight EOD)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -5440,
+        3360
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT \n    a.id AS account_id,\n    p.id AS product_id,\n    calculate_daily_interest(a.id, p.id, CURRENT_DATE) AS interest_result\nFROM accounts a\nCROSS JOIN (\n    SELECT id \n    FROM interest_products \n    WHERE active = true \n    ORDER BY created_at ASC \n    LIMIT 1\n) p\nWHERE a.status = 'active'\n  AND a.balance > 0;",
+        "options": {}
+      },
+      "id": "c0e000f0-7d57-45c1-bb41-997fcd1dcf67",
+      "name": "Calculate Daily Interest (Req 4.1)",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        -5232,
+        3360
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "yEKIebmB3WWK2PUr",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT run_reconciliation();",
+        "options": {}
+      },
+      "id": "91e17541-d655-4a63-9c16-cd6d0bb98284",
+      "name": "Run Reconciliation Audit (Req 4.2)",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        -5008,
+        3360
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "yEKIebmB3WWK2PUr",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT * FROM v_reconciliation_audit WHERE audit_status = 'DISCREPANCY_DETECTED';",
+        "options": {}
+      },
+      "id": "f2046c33-cbdc-47c4-b526-716175271e01",
+      "name": "Audit Ledger Discrepancies",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        -4784,
+        3360
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "yEKIebmB3WWK2PUr",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "cond-recon-drift",
+              "leftValue": "={{ $json.account_id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "75aa548e-a984-4ddb-8f19-33933e04357b",
+      "name": "Discrepancy Detected?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -4560,
+        3360
+      ]
+    },
+    {
+      "parameters": {
+        "sendTo": "muhamma19051037@gmail.com",
+        "subject": "CRITICAL: Nightly Reconciliation Ledger Drift",
+        "emailType": "text",
+        "message": "=Reconciliation audit detected balance discrepancy:\n\nAccount ID: {{ $json.account_id }}\nReported Balance: ${{ $json.reported_balance }}\nCalculated Ledger Sum: ${{ $json.ledger_calculated_sum }}\nDiscrepancy: ${{ $json.balance_discrepancy }}\n\nPlease inspect the immutable audit log immediately.",
+        "options": {}
+      },
+      "id": "5f0db4e1-821f-4a63-a8cf-f0895acc181e",
+      "name": "Send Recon Drift Alert Email",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        -4352,
+        3360
+      ],
+      "webhookId": "2ef38474-4680-4b73-bb61-08552b8ccb19",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "8L7rqktUeMZTXI87",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 1 * * *"
+            }
+          ]
+        }
+      },
+      "id": "304cae27-be1e-44c3-a34f-cc181d03e4df",
+      "name": "Daily Minor Check Schedule",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -5440,
+        3664
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT \n    a.id AS account_id,\n    h.email AS holder_email,\n    h.full_name,\n    check_minor_eligibility(a.id) AS converted\nFROM accounts a\nJOIN account_memberships m ON a.id = m.account_id\nJOIN account_holders h ON m.holder_id = h.id\nWHERE m.role = 'minor';",
+        "options": {}
+      },
+      "id": "0eee3675-f3f2-4ef7-bf4f-87f0b79ad21b",
+      "name": "Check Minor Eligibility (Req 1.7)",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        -5232,
+        3664
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "yEKIebmB3WWK2PUr",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "cond-minor-converted",
+              "leftValue": "={{ String($json.converted) }}",
+              "rightValue": "true",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "902541c8-01f0-427b-b70c-bc0750c1c108",
+      "name": "Any Accounts Converted?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -5008,
+        3664
+      ]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.holder_email || 'muhamma19051037@gmail.com' }}",
+        "subject": "Notice: Your Youth Account Has Been Upgraded",
+        "emailType": "text",
+        "message": "=Dear {{ $json.full_name || 'Account Holder' }},\n\nCongratulations on turning 18! In accordance with bank policy, your custodial minor account (Account #{{ $json.account_id }}) has been converted into a full independent checking account.\n\nAll guardian view and control restrictions have been lifted.\n\n— Digital Banking Services",
+        "options": {}
+      },
+      "id": "5c075f9d-a1e3-49b1-91e0-6ab668ea867e",
+      "name": "Send Account Upgrade Notice",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        -4784,
+        3616
+      ],
+      "webhookId": "d6760606-8dca-427d-812a-37c927cc2a5f",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "8L7rqktUeMZTXI87",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes"
+            }
+          ]
+        }
+      },
+      "id": "d9cbedb8-2671-497e-967e-e7820c776d44",
+      "name": "Poll Notification Queue (5m)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -5440,
+        3952
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT \n    id,\n    account_id,\n    event_type,\n    recipient_email,\n    COALESCE(payload->>'subject', 'Notification: Digital Banking Update') AS subject,\n    COALESCE(payload->>'message', payload->>'body', payload::text) AS body,\n    payload\nFROM customer_notifications_queue\nWHERE is_dispatched = false\nLIMIT 20;",
+        "options": {}
+      },
+      "id": "7717daec-47fd-47fa-94ef-0efa7c6498ad",
+      "name": "Fetch Pending Rollback Alerts (Req 2.4)",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        -5232,
+        3952
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "yEKIebmB3WWK2PUr",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.recipient_email }}",
+        "subject": "={{ $json.subject }}",
+        "emailType": "text",
+        "message": "={{ $json.body }}",
+        "options": {}
+      },
+      "id": "cfecf019-5bc1-4e11-b1c7-4183338d9002",
+      "name": "Dispatch Queue Notice via Gmail",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        -5008,
+        3952
+      ],
+      "webhookId": "a77912dc-7c3f-4378-9c18-7c5f65298973",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "8L7rqktUeMZTXI87",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE customer_notifications_queue\nSET is_dispatched = true,\n    dispatched_at = now()\nWHERE id = '{{ $('Fetch Pending Rollback Alerts (Req 2.4)').item.json.id }}'::uuid;",
+        "options": {}
+      },
+      "id": "144000a2-a598-4c6c-ad22-fb5bccba5910",
+      "name": "Mark Notice Sent in DB",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        -4784,
+        3952
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "yEKIebmB3WWK2PUr",
+          "name": "Postgres account"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Gmail Trigger": {
+      "main": [
+        [
+          {
+            "node": "Parse Inbound Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Inbound Email": {
+      "main": [
+        [
+          {
+            "node": "Generate Query Embedding (Gemini)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Query Embedding (Gemini)": {
+      "main": [
+        [
+          {
+            "node": "Query Pinecone Policies",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Query Pinecone Policies": {
+      "main": [
+        [
+          {
+            "node": "Evaluate Guardrail (Req 5.7)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Evaluate Guardrail (Req 5.7)": {
+      "main": [
+        [
+          {
+            "node": "LLM Creates Draft (Gemini 3.6)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "LLM Creates Draft (Gemini 3.6)": {
+      "main": [
+        [
+          {
+            "node": "Create Approval Request (Req 5.6)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Approval Request (Req 5.6)": {
+      "main": [
+        [
+          {
+            "node": "Send Approval Alert to Ops",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Reviewer Decision Webhook": {
+      "main": [
+        [
+          {
+            "node": "Update Approval Record",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Approval Record": {
+      "main": [
+        [
+          {
+            "node": "Is Draft Approved?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Draft Approved?": {
+      "main": [
+        [
+          {
+            "node": "Send Approved Reply via Gmail",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Return Reviewer Ack",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Approved Reply via Gmail": {
+      "main": [
+        [
+          {
+            "node": "Return Reviewer Ack",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Standing Orders Schedule (15m)": {
+      "main": [
+        [
+          {
+            "node": "Execute Standing Orders in DB",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute Standing Orders in DB": {
+      "main": [
+        [
+          {
+            "node": "Standing Order Failed Permanently?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Standing Order Failed Permanently?": {
+      "main": [
+        [
+          {
+            "node": "Fetch Primary Holder Details",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Primary Holder Details": {
+      "main": [
+        [
+          {
+            "node": "Send SO Failure Notice via Gmail",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Schedule (Midnight EOD)": {
+      "main": [
+        [
+          {
+            "node": "Calculate Daily Interest (Req 4.1)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Calculate Daily Interest (Req 4.1)": {
+      "main": [
+        [
+          {
+            "node": "Run Reconciliation Audit (Req 4.2)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run Reconciliation Audit (Req 4.2)": {
+      "main": [
+        [
+          {
+            "node": "Audit Ledger Discrepancies",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Audit Ledger Discrepancies": {
+      "main": [
+        [
+          {
+            "node": "Discrepancy Detected?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Discrepancy Detected?": {
+      "main": [
+        [
+          {
+            "node": "Send Recon Drift Alert Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Daily Minor Check Schedule": {
+      "main": [
+        [
+          {
+            "node": "Check Minor Eligibility (Req 1.7)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Minor Eligibility (Req 1.7)": {
+      "main": [
+        [
+          {
+            "node": "Any Accounts Converted?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Any Accounts Converted?": {
+      "main": [
+        [
+          {
+            "node": "Send Account Upgrade Notice",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Poll Notification Queue (5m)": {
+      "main": [
+        [
+          {
+            "node": "Fetch Pending Rollback Alerts (Req 2.4)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Pending Rollback Alerts (Req 2.4)": {
+      "main": [
+        [
+          {
+            "node": "Dispatch Queue Notice via Gmail",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Dispatch Queue Notice via Gmail": {
+      "main": [
+        [
+          {
+            "node": "Mark Notice Sent in DB",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "46b89482-e3b1-4f84-ad54-1d5c2cbdf68c",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "9ff572fa846a672447b6dbb24074c9f0518e3ed94223175e68cd51bb607a452c"
+  },
+  "nodeGroups": [],
+  "id": "rZN1zzCIA7pntG4D",
+  "tags": []
+}
