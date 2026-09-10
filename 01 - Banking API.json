@@ -1,0 +1,362 @@
+{
+  "name": "01 - Banking API",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "banking",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "146ef756-4db8-423c-bf6a-23211e4b5269",
+      "name": "Banking API Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -720,
+        208
+      ],
+      "webhookId": "banking-api"
+    },
+    {
+      "parameters": {
+        "jsCode": "const body = $json.body || $json;\n\nconst operation = String(body.operation || '').toLowerCase();\nconst amount = Number(body.amount);\n\nif (!['deposit', 'withdrawal', 'transfer'].includes(operation)) {\n  return [{ json: { success: false, error: 'INVALID_OPERATION', message: 'operation must be deposit, withdrawal, or transfer' } }];\n}\nif (!Number.isFinite(amount) || amount <= 0) {\n  return [{ json: { success: false, error: 'INVALID_AMOUNT', message: 'amount must be a positive number' } }];\n}\nif (!body.idempotency_key) {\n  return [{ json: { success: false, error: 'MISSING_IDEMPOTENCY_KEY', message: 'idempotency_key is required' } }];\n}\nif (!body.account_id && operation !== 'transfer') {\n  return [{ json: { success: false, error: 'MISSING_ACCOUNT_ID', message: 'account_id is required' } }];\n}\nif (operation === 'transfer' && (!body.source_account_id || !body.destination_account_id)) {\n  return [{ json: { success: false, error: 'MISSING_TRANSFER_ACCOUNTS', message: 'source_account_id and destination_account_id are required for transfer' } }];\n}\nif (!body.currency) {\n  return [{ json: { success: false, error: 'MISSING_CURRENCY', message: 'currency is required' } }];\n}\n\nreturn [{\n  json: {\n    operation,\n    idempotency_key: String(body.idempotency_key),\n    account_id: body.account_id || null,\n    source_account_id: body.source_account_id || null,\n    destination_account_id: body.destination_account_id || null,\n    amount,\n    currency: String(body.currency).toUpperCase(),\n    transaction_type: body.transaction_type || 'transfer',\n    description: body.description || 'Banking API transaction'\n  }\n}];"
+      },
+      "id": "6de4d02f-f134-4813-b235-40b906732b2a",
+      "name": "Validate Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -480,
+        208
+      ]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": false,
+                  "leftValue": "={{ $json.operation }}",
+                  "typeValidation": "strict",
+                  "version": 1
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.operation }}",
+                    "rightValue": "deposit",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "deposit"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": false,
+                  "leftValue": "={{ $json.operation }}",
+                  "typeValidation": "strict",
+                  "version": 1
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.operation }}",
+                    "rightValue": "withdrawal",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "withdrawal"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": false,
+                  "leftValue": "={{ $json.operation }}",
+                  "typeValidation": "strict",
+                  "version": 1
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.operation }}",
+                    "rightValue": "transfer",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "transfer"
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra"
+        }
+      },
+      "id": "1abf2338-4160-42e2-9c06-e9002db57dbd",
+      "name": "Operation Router",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [
+        -240,
+        208
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://vwqyuqccqugjmusfpkem.supabase.co/rest/v1/rpc/process_bank_deposit",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $vars.SUPABASE_SERVICE_ROLE_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $vars.SUPABASE_SERVICE_ROLE_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { p_idempotency_key: $json.idempotency_key, p_account_id: $json.account_id, p_amount: $json.amount, p_currency: $json.currency } }}",
+        "options": {}
+      },
+      "id": "3feb4608-09b3-4df3-a654-d6eb6c04f74e",
+      "name": "Supabase - Deposit",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://vwqyuqccqugjmusfpkem.supabase.co/rest/v1/rpc/process_bank_withdrawal",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $vars.SUPABASE_SERVICE_ROLE_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $vars.SUPABASE_SERVICE_ROLE_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { p_idempotency_key: $json.idempotency_key, p_account_id: $json.account_id, p_amount: $json.amount, p_currency: $json.currency } }}",
+        "options": {}
+      },
+      "id": "a143489b-6282-48f8-afb6-90e55171545b",
+      "name": "Supabase - Withdrawal",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        0,
+        208
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://vwqyuqccqugjmusfpkem.supabase.co/rest/v1/rpc/process_bank_transfer",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $vars.SUPABASE_SERVICE_ROLE_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $vars.SUPABASE_SERVICE_ROLE_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { p_idempotency_key: $json.idempotency_key, p_source_account_id: $json.source_account_id, p_destination_account_id: $json.destination_account_id, p_amount: $json.amount, p_currency: $json.currency, p_transaction_type: $json.transaction_type } }}",
+        "options": {}
+      },
+      "id": "0e75ccb3-bc8f-433b-a028-6341161cc2e6",
+      "name": "Supabase - Transfer",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        0,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const result = $json;\nreturn [{ json: { success: true, status: result.status || 'completed', result } }];"
+      },
+      "id": "a541a3c9-414f-418f-86dd-28168dea326d",
+      "name": "Format Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        208
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}",
+        "options": {}
+      },
+      "id": "e99085ac-cde9-4787-b447-bc1c1158dd29",
+      "name": "API Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        480,
+        208
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Banking API Webhook": {
+      "main": [
+        [
+          {
+            "node": "Validate Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Request": {
+      "main": [
+        [
+          {
+            "node": "Operation Router",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Operation Router": {
+      "main": [
+        [
+          {
+            "node": "Supabase - Deposit",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Supabase - Withdrawal",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Supabase - Transfer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Supabase - Deposit": {
+      "main": [
+        [
+          {
+            "node": "Format Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Supabase - Withdrawal": {
+      "main": [
+        [
+          {
+            "node": "Format Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Supabase - Transfer": {
+      "main": [
+        [
+          {
+            "node": "Format Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Response": {
+      "main": [
+        [
+          {
+            "node": "API Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "67871ebf-b718-4895-8b2a-c52a682609c0",
+  "meta": {
+    "instanceId": "9ff572fa846a672447b6dbb24074c9f0518e3ed94223175e68cd51bb607a452c"
+  },
+  "nodeGroups": [],
+  "id": "RaAePnZB1OSO2fPS",
+  "tags": []
+}
