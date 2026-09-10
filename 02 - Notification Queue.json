@@ -1,0 +1,602 @@
+{
+  "name": "02 - Notification Queue",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 2
+            }
+          ]
+        }
+      },
+      "id": "2729e29e-97fb-4a13-ab30-352bbcea54a7",
+      "name": "Every 2 Minutes",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -896,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://vwqyuqccqugjmusfpkem.supabase.co/rest/v1/customer_notifications_queue",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "is_dispatched",
+              "value": "eq.false"
+            },
+            {
+              "name": "dispatch_attempts",
+              "value": "lt.5"
+            },
+            {
+              "name": "order",
+              "value": "created_at.asc"
+            },
+            {
+              "name": "limit",
+              "value": "50"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $vars.SUPABASE_SERVICE_ROLE_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $vars.SUPABASE_SERVICE_ROLE_KEY }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "9298ffe0-07cc-41e5-8e42-9c71687a84a6",
+      "name": "Fetch Pending Notifications",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -688,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const input = $input.all();\nif (input.length === 1) {\n  const first = input[0].json;\n  if (Array.isArray(first)) return first.map(row => ({ json: row }));\n}\nreturn input.map(i => ({ json: i.json }));"
+      },
+      "id": "9b468bfa-8c5c-40c2-b0cf-e3699678e34a",
+      "name": "Split Into Items",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -464,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 1
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.event_type }}",
+                    "rightValue": "standing_order_failed",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "standing_order_failed"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 1
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.event_type }}",
+                    "rightValue": "transfer_rolled_back",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "transfer_rolled_back"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 1
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.event_type }}",
+                    "rightValue": "fraud_hold_placed",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "fraud_hold_placed"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 1
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.event_type }}",
+                    "rightValue": "negative_balance_alert",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "negative_balance_alert"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 1
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.event_type }}",
+                    "rightValue": "reconciliation_discrepancy",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "reconciliation_discrepancy"
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra"
+        }
+      },
+      "id": "91b38a35-0d3a-44a5-af8e-39d6c65928dd",
+      "name": "Route by Event Type",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [
+        -240,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.recipient_email }}",
+        "subject": "Standing order failed",
+        "emailType": "text",
+        "message": "=Hello,\n\nYour standing order {{ $json.payload.standing_order_id }} for {{ $json.payload.amount }} {{ $json.payload.currency }} could not be completed on {{ $json.payload.failed_date }}.\n\nReason: {{ $json.payload.reason }}\nAttempts: {{ $json.payload.retry_count }}\n\nPlease ensure sufficient funds or update the standing order.\n\n— Digital Banking",
+        "options": {}
+      },
+      "id": "c5026d39-9749-4617-a5c4-e064a8f2127e",
+      "name": "Gmail - SO Failed",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        0
+      ],
+      "webhookId": "8533001f-81df-49bb-bb5d-51acb64896a5",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "8L7rqktUeMZTXI87",
+          "name": "Gmail account"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.recipient_email }}",
+        "subject": "Transfer reversed",
+        "emailType": "text",
+        "message": "=Hello,\n\nA transfer of {{ $json.payload.amount }} {{ $json.payload.currency }} on {{ $json.payload.date }} was rolled back.\n\nReference: {{ $json.payload.journal_entry_id }}\nReason: {{ $json.payload.reason }}\n\nNo funds were moved. If this is unexpected, contact support.\n\n— Digital Banking",
+        "options": {}
+      },
+      "id": "2247f012-c8bf-4bae-ae50-b4a854399f4d",
+      "name": "Gmail - Transfer Rolled Back",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        208
+      ],
+      "webhookId": "1dd3b8eb-baba-44f0-91bb-b0c2dfa3f4e4",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "8L7rqktUeMZTXI87",
+          "name": "Gmail account"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.recipient_email }}",
+        "subject": "Security alert - hold placed on your account",
+        "emailType": "text",
+        "message": "=Hello,\n\nWe placed a temporary hold on {{ $json.payload.amount_flagged }} {{ $json.payload.currency }} on {{ $json.payload.date }}.\n\nReason: {{ $json.payload.reason }}\nHold ID: {{ $json.payload.hold_id }}\n\nIf this was you, no action is needed. If not, contact us immediately.\n\n— Digital Banking",
+        "options": {}
+      },
+      "id": "88131221-d36c-44c5-95a5-dbafea54efeb",
+      "name": "Gmail - Fraud Hold",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        400
+      ],
+      "webhookId": "ec746920-335e-42b9-b111-2c2b997a9889",
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.recipient_email }}",
+        "subject": "Your account balance is negative",
+        "emailType": "text",
+        "message": "=Hello,\n\nYour account balance is now {{ $json.payload.balance }} {{ $json.payload.currency }} as of {{ $json.payload.date }}.\n\nPlease bring the balance back to at least {{ $json.payload.threshold }} to avoid further action.\n\n— Digital Banking",
+        "options": {}
+      },
+      "id": "b6c2828f-4c12-4197-8841-aa823662b506",
+      "name": "Gmail - Negative Balance",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        608
+      ],
+      "webhookId": "487766b9-5eca-452a-bd57-00d8150d2750",
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.recipient_email }}",
+        "subject": "Reconciliation discrepancy detected",
+        "emailType": "text",
+        "message": "=Reconciliation run at {{ $json.payload.reconciled_at }} found discrepancies.\n\nAccounts checked: {{ $json.payload.accounts_checked }}\nMismatches found: {{ $json.payload.mismatches_found }}\n\nDetails:\n{{ JSON.stringify($json.payload.discrepancies, null, 2) }}\n\n— Digital Banking (ops)",
+        "options": {}
+      },
+      "id": "2184244c-2172-4015-a89f-238d1e2acf95",
+      "name": "Gmail - Reconciliation Alert",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        800
+      ],
+      "webhookId": "83558265-9440-4aac-9095-6b6e98efda63",
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "=https://vwqyuqccqugjmusfpkem.supabase.co/rest/v1/customer_notifications_queue?id=eq.{{ $('Split Into Items').item.json.id }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $vars.SUPABASE_SERVICE_ROLE_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $vars.SUPABASE_SERVICE_ROLE_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Prefer",
+              "value": "return=minimal"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { is_dispatched: true, dispatched_at: new Date().toISOString() } }}",
+        "options": {}
+      },
+      "id": "88cd0db2-c7bb-4985-a0e4-6b1ec0dbebef",
+      "name": "Mark Dispatched",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        272,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "=https://vwqyuqccqugjmusfpkem.supabase.co/rest/v1/customer_notifications_queue?id=eq.{{ $('Split Into Items').item.json.id }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $vars.SUPABASE_SERVICE_ROLE_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $vars.SUPABASE_SERVICE_ROLE_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Prefer",
+              "value": "return=minimal"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { dispatch_attempts: ($('Split Into Items').item.json.dispatch_attempts || 0) + 1, last_dispatch_error: 'send failed' } }}",
+        "options": {}
+      },
+      "id": "8410753e-8fbc-47f3-928b-465943b3e0a7",
+      "name": "Record Failure",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        272,
+        912
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "return [];"
+      },
+      "id": "b8b58c6b-ca2b-4887-9695-2b0678f40c88",
+      "name": "Unsupported Event",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        0,
+        912
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Every 2 Minutes": {
+      "main": [
+        [
+          {
+            "node": "Fetch Pending Notifications",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Pending Notifications": {
+      "main": [
+        [
+          {
+            "node": "Split Into Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split Into Items": {
+      "main": [
+        [
+          {
+            "node": "Route by Event Type",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route by Event Type": {
+      "main": [
+        [
+          {
+            "node": "Gmail - SO Failed",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Gmail - Transfer Rolled Back",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Gmail - Fraud Hold",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Gmail - Negative Balance",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Gmail - Reconciliation Alert",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Unsupported Event",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gmail - SO Failed": {
+      "main": [
+        [
+          {
+            "node": "Mark Dispatched",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Record Failure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gmail - Transfer Rolled Back": {
+      "main": [
+        [
+          {
+            "node": "Mark Dispatched",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Record Failure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gmail - Fraud Hold": {
+      "main": [
+        [
+          {
+            "node": "Mark Dispatched",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Record Failure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gmail - Negative Balance": {
+      "main": [
+        [
+          {
+            "node": "Mark Dispatched",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Record Failure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gmail - Reconciliation Alert": {
+      "main": [
+        [
+          {
+            "node": "Mark Dispatched",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Record Failure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "4aef096a-e1e2-44b6-af68-7163c5ae1cbd",
+  "meta": {
+    "instanceId": "9ff572fa846a672447b6dbb24074c9f0518e3ed94223175e68cd51bb607a452c"
+  },
+  "nodeGroups": [],
+  "id": "N4PB5M2eqjGfbxWY",
+  "tags": []
+}
