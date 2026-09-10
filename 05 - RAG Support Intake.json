@@ -1,0 +1,512 @@
+{
+  "name": "05 - RAG Support Intake",
+  "nodes": [
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyMinute"
+            }
+          ]
+        },
+        "simple": false,
+        "filters": {
+          "q": "is:unread label:INBOX"
+        },
+        "options": {}
+      },
+      "id": "21658b97-6327-4ad2-98cc-4723f507379d",
+      "name": "Gmail Trigger",
+      "type": "n8n-nodes-base.gmailTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -2208,
+        112
+      ],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "8L7rqktUeMZTXI87",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const email = $input.first().json;\nlet sender = '';\nif (typeof email.from === 'string') sender = email.from;\nelse if (email.from?.text) sender = email.from.text;\nelse if (email.from?.value?.[0]?.address) sender = email.from.value[0].address;\nelse if (email.headers?.from) sender = email.headers.from;\nsender = String(sender || '');\nconst match = sender.match(/<([^>]+)>/);\nconst senderEmail = match ? match[1].trim() : (sender.trim() || 'customer@example.com');\nreturn [{ json: { sender_email: senderEmail, subject: String(email.subject || email.headers?.subject || 'Support Query'), customer_query: String(email.snippet || email.textPlain || email.text || email.subject || '').trim(), message_id: email.id || email.messageId || '' } }];"
+      },
+      "id": "d6575ff3-0a7c-4611-8290-2da3a3c2b412",
+      "name": "Parse Inbound Email",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1984,
+        112
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-001:embedContent",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-goog-api-key",
+              "value": "={{ $vars.GEMINI_API_KEY }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"content\": { \"parts\": [ { \"text\": {{ JSON.stringify($json.customer_query) }} } ] },\n  \"output_dimensionality\": 768\n}",
+        "options": {}
+      },
+      "id": "d6876b5c-190b-459c-ae05-367c0db39740",
+      "name": "Gemini Embed Query",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -1760,
+        112
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://bank-policies-a7lgv6c.svc.aped-4627-b74a.pinecone.io/query",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Api-Key",
+              "value": "={{ $vars.PINECONE_API_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"vector\": {{ JSON.stringify($('Gemini Embed Query').item.json.embedding.values) }},\n  \"topK\": 2,\n  \"includeMetadata\": true\n}",
+        "options": {}
+      },
+      "id": "b249c225-a69b-42fa-8d44-fcb0e7b1b3b3",
+      "name": "Pinecone Query Policies",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -1536,
+        112
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const matches = $json.matches || [];\nconst topScore = matches.length > 0 ? matches[0].score : 0;\nconst context = matches.map(m => (m.metadata ? m.metadata.text : '')).filter(Boolean).join('\\n\\n');\nconst original = $('Parse Inbound Email').first().json;\nconst query = (original.customer_query || '').toLowerCase();\nconst isHighRisk = query.includes('fraud hold') || query.includes('unfreeze') || query.includes('dispute') || query.includes('chargeback') || query.includes('reversal');\nconst isConfident = topScore >= 0.70 && context.trim().length > 0;\nreturn [{ json: { sender_email: original.sender_email, subject: original.subject, customer_query: original.customer_query, retrieved_context: isConfident ? context : 'INSUFFICIENT_INFORMATION', top_score: topScore, requires_human_approval: isHighRisk || !isConfident, high_risk: isHighRisk } }];"
+      },
+      "id": "d05f2738-0655-4953-befa-dc095d01803e",
+      "name": "Evaluate Guardrail",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1328,
+        112
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-goog-api-key",
+              "value": "={{ $vars.GEMINI_API_KEY }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"contents\": [\n    {\n      \"parts\": [\n        { \"text\": \"{{ $json.prompt }}\" }\n      ]\n    }\n  ],\n  \"generationConfig\": { \"temperature\": 0.2, \"maxOutputTokens\": 512 }\n}",
+        "options": {}
+      },
+      "id": "84ea21cf-c26d-4070-a54f-b7fb4329d609",
+      "name": "Gemini Draft Reply",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -1104,
+        112
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-goog-api-key",
+              "value": "={{ $vars.GEMINI_API_KEY }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"contents\": [\n    {\n      \"parts\": [\n        { \"text\": \"{{ $json.prompt }}\" }\n      ]\n    }\n  ],\n  \"generationConfig\": { \"temperature\": 0, \"maxOutputTokens\": 128 }\n}",
+        "options": {}
+      },
+      "id": "92331a10-9da4-40de-878f-bc2fcde7dd62",
+      "name": "Hallucination Check",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -880,
+        112
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const original = $('Evaluate Guardrail').first().json;\nconst draft = $('Gemini Draft Reply').first().json.candidates[0].content.parts[0].text || '';\nlet hallucinated = false;\nlet reason = '';\ntry {\n  const raw = $json.candidates[0].content.parts[0].text || '';\n  let cleaned = raw.replace(/```json|```/g, '').trim();\n  const firstBrace = cleaned.indexOf('{');\n  const lastBrace = cleaned.lastIndexOf('}');\n  if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) cleaned = cleaned.slice(firstBrace, lastBrace + 1);\n  const parsed = JSON.parse(cleaned);\n  hallucinated = !!parsed.hallucinated;\n  reason = String(parsed.reason || '');\n} catch (e) {\n  hallucinated = true;\n  reason = 'hallucination_check_unparseable';\n}\nreturn [{ json: { sender_email: original.sender_email, subject: original.subject, customer_query: original.customer_query, retrieved_context: original.retrieved_context, top_score: original.top_score, draft_response: draft, hallucinated, hallucination_reason: reason, requires_human_approval: original.requires_human_approval || hallucinated } }];"
+      },
+      "id": "df620f3d-c070-4912-ad01-c4f18f19c465",
+      "name": "Merge Hallucination Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -656,
+        112
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://vwqyuqccqugjmusfpkem.supabase.co/rest/v1/rpc/create_approval_request",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $vars.SUPABASE_SERVICE_ROLE_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $vars.SUPABASE_SERVICE_ROLE_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {\n  p_type: 'RAG_SUPPORT_RESPONSE',\n  p_recipient_email: $json.sender_email,\n  p_subject: $json.subject,\n  p_draft_response: $json.draft_response,\n  p_metadata: { top_score: $json.top_score, hallucinated: $json.hallucinated, hallucination_reason: $json.hallucination_reason }\n} }}",
+        "options": {}
+      },
+      "id": "6f318caf-c232-488b-b269-75f1ef20c3ff",
+      "name": "Create Approval via RPC",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -448,
+        112
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "let payload = $json;\nif (typeof payload === 'string') { try { payload = JSON.parse(payload); } catch (e) {} }\nconst row = Array.isArray(payload) ? payload[0] : payload;\nconst approvalId = row?.approval_id || row?.[0]?.approval_id || (typeof row === 'object' && row !== null ? Object.values(row)[0] : null);\nif (!approvalId || typeof approvalId !== 'string') throw new Error('create_approval_request did not return approval_id. Got: ' + JSON.stringify($json));\nreturn [{ json: { approval_id: approvalId } }];"
+      },
+      "id": "077379e8-a02d-43c6-b6a4-363f1238fae6",
+      "name": "Extract Approval ID",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -224,
+        112
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://vwqyuqccqugjmusfpkem.supabase.co/rest/v1/rpc/sign_approval_token",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $vars.SUPABASE_SERVICE_ROLE_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $vars.SUPABASE_SERVICE_ROLE_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {\n  p_approval_id: $json.approval_id,\n  p_decision: 'approved',\n  p_secret: $vars.HMAC_SECRET,\n  p_ttl_minutes: 1440\n} }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text"
+            }
+          }
+        }
+      },
+      "id": "7eebcdf9-3582-4e61-88de-90aebc834043",
+      "name": "Sign Approve Token",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://vwqyuqccqugjmusfpkem.supabase.co/rest/v1/rpc/sign_approval_token",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $vars.SUPABASE_SERVICE_ROLE_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $vars.SUPABASE_SERVICE_ROLE_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {\n  p_approval_id: $('Extract Approval ID').item.json.approval_id,\n  p_decision: 'rejected',\n  p_secret: $vars.HMAC_SECRET,\n  p_ttl_minutes: 1440\n} }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text"
+            }
+          }
+        }
+      },
+      "id": "da0110fc-a6b5-4092-8528-a569146a1aa8",
+      "name": "Sign Reject Token",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        0,
+        208
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const approvalId = $('Extract Approval ID').item.json.approval_id;\nconst approveRaw = $('Sign Approve Token').item.json;\nconst rejectRaw  = $('Sign Reject Token').item.json;\nfunction extractToken(obj) {\n  if (obj == null) return '';\n  if (typeof obj === 'string') return obj;\n  if (typeof obj.data === 'string') return obj.data;\n  if (typeof obj.sign_approval_token === 'string') return obj.sign_approval_token;\n  if (typeof obj === 'object') { const values = Object.values(obj); if (values.length && typeof values[0] === 'string') return values[0]; }\n  return '';\n}\nlet approveStr = extractToken(approveRaw).replace(/^\"|\"$/g, '').trim();\nlet rejectStr  = extractToken(rejectRaw).replace(/^\"|\"$/g, '').trim();\nif (!approveStr || !rejectStr) throw new Error('Missing signed token.');\nconst original = $('Merge Hallucination Result').first().json;\nconst base = ($vars.N8N_PUBLIC_URL || '').replace(/\\/$/, '');\nif (!base) throw new Error('N8N_PUBLIC_URL variable not set');\nreturn [{ json: { approval_id: approvalId, approve_url: base + '/webhook/rag-approve?token=' + encodeURIComponent(approveStr), reject_url: base + '/webhook/rag-approve?token=' + encodeURIComponent(rejectStr), sender_email: original.sender_email, subject: original.subject, customer_query: original.customer_query, draft_response: original.draft_response, hallucinated: original.hallucinated, hallucination_reason: original.hallucination_reason } }];"
+      },
+      "id": "69eb181e-81bd-46d8-a996-a9bd3bda1c9d",
+      "name": "Build Signed Links",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        224,
+        112
+      ]
+    },
+    {
+      "parameters": {
+        "sendTo": "mianhassnainmustafa@gmail.com",
+        "subject": "=ACTION REQUIRED: Support draft #{{ $json.approval_id }} pending approval",
+        "emailType": "text",
+        "message": "=A new customer support response requires your approval before sending.\n\nRecipient: {{ $json.sender_email }}\nSubject:   {{ $json.subject }}\nQuery:     {{ $json.customer_query }}\n\nHallucination check: {{ $json.hallucinated ? 'FLAGGED - ' + $json.hallucination_reason : 'clean' }}\n\n--- DRAFT ---\n{{ $json.draft_response }}\n--- END ---\n\nApproval ID: {{ $json.approval_id }}\n\nAPPROVE and send:\n{{ $json.approve_url }}\n\nREJECT (do not send):\n{{ $json.reject_url }}\n\nThese links are HMAC-signed and expire in 24 hours.\n\n- Digital Banking Support Operations",
+        "options": {}
+      },
+      "id": "dc5ec9ca-0be0-4c09-bf05-f1eda90d6c39",
+      "name": "Send Approval Alert",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        448,
+        112
+      ],
+      "webhookId": "1182d992-a45d-4060-b753-8cd5b890c1ad",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "8L7rqktUeMZTXI87",
+          "name": "Gmail account"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Gmail Trigger": {
+      "main": [
+        [
+          {
+            "node": "Parse Inbound Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Inbound Email": {
+      "main": [
+        [
+          {
+            "node": "Gemini Embed Query",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gemini Embed Query": {
+      "main": [
+        [
+          {
+            "node": "Pinecone Query Policies",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pinecone Query Policies": {
+      "main": [
+        [
+          {
+            "node": "Evaluate Guardrail",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Evaluate Guardrail": {
+      "main": [
+        [
+          {
+            "node": "Gemini Draft Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gemini Draft Reply": {
+      "main": [
+        [
+          {
+            "node": "Hallucination Check",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Hallucination Check": {
+      "main": [
+        [
+          {
+            "node": "Merge Hallucination Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge Hallucination Result": {
+      "main": [
+        [
+          {
+            "node": "Create Approval via RPC",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Approval via RPC": {
+      "main": [
+        [
+          {
+            "node": "Extract Approval ID",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Approval ID": {
+      "main": [
+        [
+          {
+            "node": "Sign Approve Token",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sign Approve Token": {
+      "main": [
+        [
+          {
+            "node": "Sign Reject Token",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sign Reject Token": {
+      "main": [
+        [
+          {
+            "node": "Build Signed Links",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Signed Links": {
+      "main": [
+        [
+          {
+            "node": "Send Approval Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "f27a7223-a43a-491b-b088-3828a533a5cd",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "9ff572fa846a672447b6dbb24074c9f0518e3ed94223175e68cd51bb607a452c"
+  },
+  "nodeGroups": [],
+  "id": "OCq3upblrJwfZYAC",
+  "tags": []
+}
