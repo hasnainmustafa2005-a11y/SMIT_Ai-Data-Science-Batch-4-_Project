@@ -1,0 +1,610 @@
+{
+  "name": "03 - Standing Orders",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 6
+            }
+          ]
+        }
+      },
+      "id": "d8344a51-a8c7-47e8-a685-771b36d1b6fb",
+      "name": "Every 6 Hours",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -2464,
+        304
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const today = new Date().toISOString().slice(0, 10);\nreturn [{ json: { p_reference_date: today } }];"
+      },
+      "id": "91f1475e-680c-47d5-b200-43c1cf1ca16f",
+      "name": "Build RPC Body",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2240,
+        304
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://vwqyuqccqugjmusfpkem.supabase.co/rest/v1/rpc/process_due_standing_orders",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $vars.SUPABASE_SERVICE_ROLE_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $vars.SUPABASE_SERVICE_ROLE_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { p_reference_date: $json.p_reference_date } }}",
+        "options": {}
+      },
+      "id": "96e6a93a-d5f9-4b47-94cd-edbc7a9dcf29",
+      "name": "Process Due Standing Orders",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -2016,
+        304
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const input = $input.all();\nif (input.length === 1) {\n  const first = input[0].json;\n  if (Array.isArray(first)) return first.map(row => ({ json: row }));\n  if (typeof first === 'object' && first !== null && !first.standing_order_id) {\n    const keys = Object.keys(first);\n    if (keys.every(k => /^\\d+$/.test(k))) return keys.map(k => ({ json: first[k] }));\n  }\n}\nreturn input.map(i => ({ json: i.json }));"
+      },
+      "id": "5beafc50-055e-494f-bbef-fe04dd150160",
+      "name": "Split Rows",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1808,
+        304
+      ]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": false,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 1
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.execution_result }}",
+                    "rightValue": "permanently_failed",
+                    "operator": {
+                      "type": "string",
+                      "operation": "startsWith"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "permanently_failed"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": false,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 1
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.execution_result }}",
+                    "rightValue": "success",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "success"
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra"
+        }
+      },
+      "id": "23aef60e-5a3f-4f38-8717-0b97c5da0537",
+      "name": "Route by Result",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [
+        -1584,
+        304
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const row = $json;\nif (!row.execution_key) throw new Error('execution_key missing. Fields: ' + Object.keys(row).join(', '));\nreturn [{ json: { standing_order_id: row.standing_order_id, execution_key: row.execution_key, expected_execution_date: row.expected_execution_date, expected_version: 1, attempt: row.attempt, status: 'permanently_failed', failure_reason: row.execution_result, completed_at: new Date().toISOString() } }];"
+      },
+      "id": "6610c95e-8346-436e-a5c4-9e1f737304bd",
+      "name": "Prep Execution (Fail)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1360,
+        112
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const row = $json;\nif (!row.execution_key) throw new Error('execution_key missing. Fields: ' + Object.keys(row).join(', '));\nreturn [{ json: { standing_order_id: row.standing_order_id, execution_key: row.execution_key, expected_execution_date: row.expected_execution_date, expected_version: 1, attempt: row.attempt, status: 'executed', failure_reason: null, completed_at: new Date().toISOString() } }];"
+      },
+      "id": "c3f501ef-d030-4743-8d97-8781ecb4742d",
+      "name": "Prep Execution (Success)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1360,
+        304
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const row = $json;\nif (!row.execution_key) throw new Error('execution_key missing. Fields: ' + Object.keys(row).join(', '));\nreturn [{ json: { standing_order_id: row.standing_order_id, execution_key: row.execution_key, expected_execution_date: row.expected_execution_date, expected_version: 1, attempt: row.attempt, status: 'retrying', failure_reason: row.execution_result, completed_at: new Date().toISOString() } }];"
+      },
+      "id": "4b4f2003-3bb9-40fe-ab93-f22fc3fd48ac",
+      "name": "Prep Execution (Retry)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1360,
+        512
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://vwqyuqccqugjmusfpkem.supabase.co/rest/v1/standing_order_executions",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $vars.SUPABASE_SERVICE_ROLE_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $vars.SUPABASE_SERVICE_ROLE_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Prefer",
+              "value": "return=minimal"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json }}",
+        "options": {}
+      },
+      "id": "1607f006-0547-44ea-aeb4-08d43953a541",
+      "name": "Insert Execution Log",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -1120,
+        304
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://vwqyuqccqugjmusfpkem.supabase.co/rest/v1/standing_orders",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "id",
+              "value": "=eq.{{ $('Split Rows').item.json.standing_order_id }}"
+            },
+            {
+              "name": "select",
+              "value": "id,source_account_id,amount,description"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $vars.SUPABASE_SERVICE_ROLE_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $vars.SUPABASE_SERVICE_ROLE_KEY }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "e2bdb65a-20ab-4bc3-abcb-91e6dcdc8c82",
+      "name": "Fetch Standing Order",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -1120,
+        112
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const rows = $input.all();\nreturn rows.map(r => ({ json: r.json }));"
+      },
+      "id": "aece8d07-5426-4f8d-9e5d-2db0ce7f86ef",
+      "name": "Split SO",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -896,
+        112
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://vwqyuqccqugjmusfpkem.supabase.co/rest/v1/account_memberships",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "account_id",
+              "value": "=eq.{{ $json.source_account_id }}"
+            },
+            {
+              "name": "select",
+              "value": "holder_id,account_holders(id,email,full_name)"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $vars.SUPABASE_SERVICE_ROLE_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $vars.SUPABASE_SERVICE_ROLE_KEY }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "98a81102-dc64-4d55-975c-5e77604b87fe",
+      "name": "Fetch Holders of Source Account",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -688,
+        112
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const parent = $('Split SO').item.json;\nconst mems = $input.all();\nconst out = [];\nfor (const m of mems) {\n  const h = m.json.account_holders;\n  if (!h || !h.email) continue;\n  out.push({\n    json: {\n      account_id: parent.source_account_id,\n      event_type: 'standing_order_failed',\n      recipient_email: h.email,\n      payload: {\n        standing_order_id: parent.id,\n        amount: parent.amount,\n        currency: 'USD',\n        reason: 'standing order permanently failed',\n        failed_date: new Date().toISOString().slice(0, 10),\n        retry_count: 0,\n        holder_name: h.full_name\n      }\n    }\n  });\n}\nif (out.length === 0) {\n  return [{ json: { _warning: 'no_holders_with_email', account_id: parent.source_account_id, standing_order_id: parent.id } }];\n}\nreturn out;"
+      },
+      "id": "fb76e57d-5b2e-4341-9884-2af7f800094a",
+      "name": "Build Notification Rows",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -464,
+        112
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "warn-check",
+              "leftValue": "={{ $json._warning }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "252b595d-1131-450f-b193-bee5d74d79c4",
+      "name": "No Holders?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -240,
+        112
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://vwqyuqccqugjmusfpkem.supabase.co/rest/v1/customer_notifications_queue",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $vars.SUPABASE_SERVICE_ROLE_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $vars.SUPABASE_SERVICE_ROLE_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Prefer",
+              "value": "return=minimal"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { account_id: $json.account_id, event_type: $json.event_type, recipient_email: $json.recipient_email, payload: $json.payload } }}",
+        "options": {}
+      },
+      "id": "44b05daa-b163-4368-a857-dbb610ac2e10",
+      "name": "Queue Notification",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "return [];"
+      },
+      "id": "4729853a-8b95-43c1-a799-09099130b383",
+      "name": "Log Warning",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        0,
+        208
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Every 6 Hours": {
+      "main": [
+        [
+          {
+            "node": "Build RPC Body",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build RPC Body": {
+      "main": [
+        [
+          {
+            "node": "Process Due Standing Orders",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Process Due Standing Orders": {
+      "main": [
+        [
+          {
+            "node": "Split Rows",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split Rows": {
+      "main": [
+        [
+          {
+            "node": "Route by Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route by Result": {
+      "main": [
+        [
+          {
+            "node": "Prep Execution (Fail)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Prep Execution (Success)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Prep Execution (Retry)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prep Execution (Fail)": {
+      "main": [
+        [
+          {
+            "node": "Insert Execution Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prep Execution (Success)": {
+      "main": [
+        [
+          {
+            "node": "Insert Execution Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prep Execution (Retry)": {
+      "main": [
+        [
+          {
+            "node": "Insert Execution Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insert Execution Log": {
+      "main": [
+        [
+          {
+            "node": "Fetch Standing Order",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Standing Order": {
+      "main": [
+        [
+          {
+            "node": "Split SO",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split SO": {
+      "main": [
+        [
+          {
+            "node": "Fetch Holders of Source Account",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Holders of Source Account": {
+      "main": [
+        [
+          {
+            "node": "Build Notification Rows",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Notification Rows": {
+      "main": [
+        [
+          {
+            "node": "No Holders?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "No Holders?": {
+      "main": [
+        [
+          {
+            "node": "Log Warning",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Queue Notification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "8255c469-019d-4166-bd69-cf0c363e3f84",
+  "meta": {
+    "instanceId": "9ff572fa846a672447b6dbb24074c9f0518e3ed94223175e68cd51bb607a452c"
+  },
+  "nodeGroups": [],
+  "id": "ZYwSZLsaZZV2chqO",
+  "tags": []
+}
