@@ -1,0 +1,446 @@
+{
+  "name": "06 - Approval Decision",
+  "nodes": [
+    {
+      "parameters": {
+        "path": "rag-approve",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "885f0689-d3c7-4dcd-98cb-f783a4f2cba9",
+      "name": "Approval Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -1888,
+        208
+      ],
+      "webhookId": "rag-approve"
+    },
+    {
+      "parameters": {
+        "jsCode": "const q = $json.query || {};\nconst token = String(q.token || '').trim();\nif (!token) {\n  return [{ json: { _error: 'MISSING_TOKEN' } }];\n}\nreturn [{ json: { token, hmac_secret: $vars.HMAC_SECRET } }];"
+      },
+      "id": "75735e3c-d30d-48c4-b42b-22fbe4654590",
+      "name": "Extract Token",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1648,
+        208
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://vwqyuqccqugjmusfpkem.supabase.co/rest/v1/rpc/verify_approval_token",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $vars.SUPABASE_SERVICE_ROLE_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $vars.SUPABASE_SERVICE_ROLE_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"p_token\": \"{{ $json.token }}\",\n  \"p_secret\": \"{{ $json.hmac_secret }}\"\n}",
+        "options": {}
+      },
+      "id": "e9bea645-3551-46e2-86ef-2ddc84c3f111",
+      "name": "Verify HMAC Token",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -1408,
+        208
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "let payload = $json;\nif (typeof payload === 'string') { try { payload = JSON.parse(payload); } catch (e) {} }\nconst row = Array.isArray(payload) ? payload[0] : payload;\nif (!row || !row.approval_id || !row.decision) {\n  return [{ json: { valid: false, reason: 'malformed_verify_response', approval_id: null, decision: null } }];\n}\nreturn [{ json: { valid: row.is_valid === true || row.is_valid === 'true', reason: row.reason || 'unknown', approval_id: row.approval_id, decision: row.decision } }];"
+      },
+      "id": "6dab5492-d938-49c6-8323-9f8e9dbc8c70",
+      "name": "Parse Verification",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1168,
+        208
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "is-valid",
+              "leftValue": "={{ $json.valid }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "713f0636-aff4-41e0-8820-297a5a23f3ca",
+      "name": "Token Valid?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -928,
+        208
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://vwqyuqccqugjmusfpkem.supabase.co/rest/v1/rpc/update_approval_decision",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $vars.SUPABASE_SERVICE_ROLE_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $vars.SUPABASE_SERVICE_ROLE_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"p_token\": \"{{ $json.token }}\",\n  \"p_secret\": \"{{ $json.hmac_secret }}\"\n}",
+        "options": {}
+      },
+      "id": "b690fb5b-0aff-4675-a237-b4c150ce83e9",
+      "name": "Update Approval Record",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -688,
+        112
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "let payload = $json;\nif (typeof payload === 'string') { try { payload = JSON.parse(payload); } catch (e) {} }\nconst row = Array.isArray(payload) ? payload[0] : payload;\nif (!row || !row.id) {\n  throw new Error('update_approval_decision did not return row. Got: ' + JSON.stringify($json));\n}\nreturn [{ json: { approval_id: row.id, status: row.status, payload: row.payload } }];"
+      },
+      "id": "5dc4f28f-cb0b-4acc-bd1e-cb5d4773a7e1",
+      "name": "Parse Updated Approval",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -464,
+        112
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "is-approved",
+              "leftValue": "={{ $json.status }}",
+              "rightValue": "APPROVED",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "330cf16e-3f8b-49b3-9e6a-fdbf2324c8b5",
+      "name": "Approved?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -240,
+        112
+      ]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.payload.recipient }}",
+        "subject": "=Re: {{ $json.payload.subject }}",
+        "emailType": "text",
+        "message": "={{ $json.payload.draft_response }}\n\n---\nDigital Banking Support Operations",
+        "options": {}
+      },
+      "id": "fb33f680-c668-4757-a901-f4ca65743556",
+      "name": "Send Reply to Customer",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        0
+      ],
+      "webhookId": "19608408-262b-41c0-a02f-ea51a2e9cad6",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "8L7rqktUeMZTXI87",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{\n  json: {\n    html: `<!DOCTYPE html><html><head><meta charset=\"utf-8\"><title>Approved</title><style>body{font-family:sans-serif;max-width:600px;margin:80px auto;padding:20px;text-align:center;color:#111}h1{color:#0a7d32}.box{border:1px solid #e0e0e0;border-radius:8px;padding:24px;margin-top:20px;background:#f9fff9}p{margin:8px 0}</style></head><body><h1>Approved and Sent</h1><div class=\"box\"><p>The support response has been approved and delivered to the customer.</p><p><strong>Approval ID:</strong> ${$json.approval_id}</p><p><strong>Customer:</strong> ${$json.payload.recipient}</p><p>You may now close this tab.</p></div></body></html>`,\n    status: 'APPROVED_SENT'\n  }\n}];"
+      },
+      "id": "da607069-e58f-40b7-8c36-737824744aaa",
+      "name": "HTML Approved",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        224,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{\n  json: {\n    html: `<!DOCTYPE html><html><head><meta charset=\"utf-8\"><title>Rejected</title><style>body{font-family:sans-serif;max-width:600px;margin:80px auto;padding:20px;text-align:center;color:#111}h1{color:#a02020}.box{border:1px solid #e0e0e0;border-radius:8px;padding:24px;margin-top:20px;background:#fff9f9}p{margin:8px 0}</style></head><body><h1>Rejected</h1><div class=\"box\"><p>The support response was rejected and will not be sent to the customer.</p><p><strong>Approval ID:</strong> ${$json.approval_id}</p><p>You may now close this tab.</p></div></body></html>`,\n    status: 'REJECTED'\n  }\n}];"
+      },
+      "id": "dbe802db-0f2f-4d86-b807-2f08dbdd1755",
+      "name": "HTML Rejected",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        0,
+        208
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const reason = $json.reason || 'unknown';\nconst friendly = reason === 'expired' ? 'This approval link has expired.'\n  : reason === 'bad_signature' ? 'This approval link is not valid (signature mismatch).'\n  : reason === 'malformed_token' ? 'This approval link is malformed.'\n  : 'This approval link could not be verified.';\nreturn [{\n  json: {\n    html: `<!DOCTYPE html><html><head><meta charset=\"utf-8\"><title>Invalid</title><style>body{font-family:sans-serif;max-width:600px;margin:80px auto;padding:20px;text-align:center;color:#111}h1{color:#a02020}.box{border:1px solid #e0e0e0;border-radius:8px;padding:24px;margin-top:20px;background:#fff9f9}p{margin:8px 0}</style></head><body><h1>Link Not Valid</h1><div class=\"box\"><p>${friendly}</p><p><strong>Reason:</strong> ${reason}</p><p>No action was taken.</p></div></body></html>`,\n    status: 'INVALID'\n  }\n}];"
+      },
+      "id": "9a9e7165-b571-4ccf-9503-4468774ebca6",
+      "name": "HTML Invalid",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -688,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "={{ $json.html }}",
+        "options": {
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "text/html; charset=utf-8"
+              }
+            ]
+          }
+        }
+      },
+      "id": "e5f0a16c-8a09-45d7-a256-b198cf357c62",
+      "name": "Respond HTML",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        480,
+        208
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Approval Webhook": {
+      "main": [
+        [
+          {
+            "node": "Extract Token",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Token": {
+      "main": [
+        [
+          {
+            "node": "Verify HMAC Token",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verify HMAC Token": {
+      "main": [
+        [
+          {
+            "node": "Parse Verification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Verification": {
+      "main": [
+        [
+          {
+            "node": "Token Valid?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Token Valid?": {
+      "main": [
+        [
+          {
+            "node": "Update Approval Record",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "HTML Invalid",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Approval Record": {
+      "main": [
+        [
+          {
+            "node": "Parse Updated Approval",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Updated Approval": {
+      "main": [
+        [
+          {
+            "node": "Approved?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Approved?": {
+      "main": [
+        [
+          {
+            "node": "Send Reply to Customer",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "HTML Rejected",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Reply to Customer": {
+      "main": [
+        [
+          {
+            "node": "HTML Approved",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTML Approved": {
+      "main": [
+        [
+          {
+            "node": "Respond HTML",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTML Rejected": {
+      "main": [
+        [
+          {
+            "node": "Respond HTML",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTML Invalid": {
+      "main": [
+        [
+          {
+            "node": "Respond HTML",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "a9bf565a-1ee3-4a42-862a-f86a76597dfb",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "9ff572fa846a672447b6dbb24074c9f0518e3ed94223175e68cd51bb607a452c"
+  },
+  "nodeGroups": [],
+  "id": "j2Eo9Yu65f5bOEc2",
+  "tags": []
+}
